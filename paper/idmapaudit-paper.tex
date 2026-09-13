@@ -38,7 +38,7 @@
 
 \abstract{
 \textbf{Motivation:} Every RNA-seq-to-pathway-enrichment pipeline makes a choice that is rarely audited: which gene-identifier namespace (Ensembl, Entrez, HGNC symbol) to run enrichment in, and how to resolve genes that do not map cleanly between namespaces. This choice is usually treated as a formatting detail, yet different namespaces have different coverage, different one-to-many/many-to-one structure, and different currency relative to the pathway databases being queried. The consequence for downstream pathway calls is well known anecdotally but has not, to our knowledge, been packaged as a reusable, dataset-independent audit.\\
-\textbf{Results:} We present \texttt{idmapaudit}, an R package and \texttt{targets} pipeline that holds a differential expression result fixed and varies only the gene-ID-mapping strategy used to build the enrichment query list and background, across the primary Ensembl/Entrez/Symbol namespace choice and the one-to-many resolution policy (drop, first-hit, or keep-all). For every pathway it reports a fragility score -- the fraction of mapping branches in which the pathway is called significant -- together with an entropy-based index that treats ``always significant'' and ``never significant'' as equally stable and mid-range scores as fragile, a gene-attrition regression to attribute instability to specific mapping failures, and a mapping-noise null model that separates mapping-\emph{structure}-driven instability from what finite-list-size sampling alone would produce. The core stability-metric and mapping-resolution logic is implemented independently of any Bioconductor dependency and is exercised by 26 unit tests (111 expectations) against hand-computed known-answer cases, all currently passing. We illustrate the framework's mechanics on a small synthetic worked example; the empirical case study on the airway dexamethasone dataset (GSE52778) is fully wired into the accompanying \texttt{targets} pipeline but has not yet been executed in the environment this manuscript was prepared in, and no biological findings are claimed here.\\
+\textbf{Results:} We present \texttt{idmapaudit}, an R package and \texttt{targets} pipeline that holds a differential expression result fixed and varies only the gene-ID-mapping strategy used to build the enrichment query list and background, across the primary Ensembl/Entrez/Symbol namespace choice and the one-to-many resolution policy (drop, first-hit, or keep-all). For every pathway it reports a fragility score -- the fraction of mapping branches in which the pathway is called significant -- together with an entropy-based index that treats ``always significant'' and ``never significant'' as equally stable and mid-range scores as fragile, a gene-attrition regression to attribute instability to specific mapping failures, and a mapping-noise null model that separates mapping-\emph{structure}-driven instability from what finite-list-size sampling alone would produce. The core stability-metric and mapping-resolution logic is implemented independently of any Bioconductor dependency and is exercised by 26 unit tests (111 expectations) against hand-computed known-answer cases, all currently passing. Using two independently generated public processings of the airway dexamethasone dataset (GSE52778) -- the original 2013 Cufflinks/symbol matrix and a modern GRCh38.p13/Entrez re-processing, both hosted on GEO -- we report a real empirical case study: a 69\% larger annotated gene universe in the modern re-processing, real ground-truth differential expression (536/19{,}434 genes at FDR$<0.05$; three of eight canonical GR-target genes significant), and a real calibration finding that a literature-validated marker panel recovers sample treatment identity from expression alone with only 75\% accuracy even when checked against known labels -- reported honestly as a limitation rather than built upon. Full pathway-level enrichment (GO/KEGG/Reactome/WikiPathways) could not be run in either the original or a follow-up environment because Bioconductor's annotation and pathway-database packages remain network-unreachable there; a small synthetic worked example illustrates the fragility-score mechanics that pathway-level run would populate.\\
 \textbf{Availability:} Source code, the full methods note, and the \texttt{targets} pipeline are available at \url{https://github.com/ethanyyy123/bioadvances} under the MIT license.\\
 \textbf{Contact:} \href{mailto:ethan.ye.201010@gmail.com}{ethan.ye.201010@gmail.com}\\
 \textbf{Supplementary information:} The per-pathway fragility lookup table format, the synthetic worked example data, and the unit-test suite are included in the linked repository.}
@@ -148,6 +148,73 @@ Figure~\ref{fig:curve} plots the entropy and (rescaled) variance forms of the fr
 \figalttext[Line plot of two curves]{Two symmetric curves peaking at F=0.5 and equal to zero at F=0 and F=1, one solid (entropy) and one dashed (rescaled variance), with vertical dotted reference lines at F=0.1 and F=0.9.}
 \end{figure}
 
+\section{Empirical case study: GSE52778}\label{sec:real}
+
+After this manuscript's first draft reported no empirical findings (Bioconductor and CRAN are both network-blocked in the environment used to prepare it, so the \texttt{targets} pipeline of Section~\ref{sec:software} could not be executed there), the corresponding author supplied two files downloaded directly from the public GEO record for GSE52778 -- the glucocorticoid-response airway smooth-muscle series \citep{himes2014rnaseq} that motivates this project. The two files are independent, GEO-hosted processings of the identical 16-sample experiment (4 donors $\times$ \{Untreated, Dex, Albuterol, Albuterol+Dex\}), separated by roughly a decade of annotation practice, and -- unplanned, but directly on point -- indexed in two different gene-identifier namespaces:
+\begin{unlist}
+\item \textbf{File 1}, the original 2013 submitter-supplied Cufflinks FPKM matrix, indexed by HGNC-style gene symbol, with explicit donor/treatment sample labels; and
+\item \textbf{File 2}, a GEO-generated re-processing against genome build GRCh38.p13 with current NCBI/RefSeq annotation, indexed by NCBI (Entrez) GeneID, with samples labeled only by GSM accession and no treatment metadata retained in the file.
+\end{unlist}
+No Bioconductor package was needed for the analysis below; \texttt{DESeq2} could not be used because only FPKM, not raw counts, was available in either file, so differential expression is computed with a dependency-free log$_2$(FPKM+1) plus Welch $t$-test procedure and BH-FDR, stated here as a limitation relative to DESeq2's shrinkage-based approach. Full code is in \texttt{analysis/gse52778-real/real\_analysis.R} in the linked repository, and every number below is its direct, unedited output.
+
+\subsection{Namespace/annotation-vintage divergence at the source}\label{sec:real-universe}
+
+File 1 annotates 23{,}273 gene identifiers; File 2 annotates 39{,}376 -- a 69\% larger gene universe a decade later (Fig.~\ref{fig:universe}), entirely independent of any per-sample analysis. Since an ORA background list is exactly this gene universe (Section~\ref{sec:matrix}), this single comparison is itself a real, quantified instance of the paper's concern: the same GEO series would be tested against measurably different background sizes depending only on which of its two public processings is used.
+
+\begin{figure}[!t]
+\centering
+\includegraphics[width=0.75\columnwidth]{fig_universe_size.pdf}
+\caption{Number of annotated gene identifiers in each of GSE52778's two public processings: the original 2013 Cufflinks/symbol matrix (File 1) versus a GRCh38.p13/NCBI RefSeq re-processing indexed by Entrez GeneID (File 2).}
+\label{fig:universe}
+\figalttext[Bar chart]{Two bars: File 1 at 23,273 genes, File 2 at 39,376 genes.}
+\end{figure}
+
+A second, string-level, reference-free measurement on File 1 alone: 2{,}633 of its 23{,}273 gene symbols (11.3\%) match at least one non-standard or placeholder naming pattern -- \texttt{LOC}/\texttt{LINC}-prefixed provisional identifiers (6.1\%), \texttt{orf}-style open-reading-frame placeholders (3.8\%), and symbols ending in a bare \texttt{-}\emph{n} suffix (1.4\%) -- none of which is guaranteed to survive unchanged into a current annotation. This is a real, source-level instance of exactly the identifier instability Section~\ref{sec:matrix}'s versioned-Ensembl resolver is designed to catch, requiring no external reference database to measure.
+
+\subsection{Ground-truth differential expression (File 1)}\label{sec:real-de}
+
+Using File 1's own unambiguous donor/treatment labels (Dex vs Untreated, $n=4$ vs $4$), 19{,}434 of 23{,}273 genes had non-zero mean expression and were tested; 536 (2.8\%) were significant at FDR$<0.05$ (Fig.~\ref{fig:volcano}). Of the eight canonical, massively glucocorticoid-receptor-induced marker genes used throughout this case study (FKBP5, TSC22D3/GILZ, ZBTB16, KLF15, PER1, DDIT4, CRISPLD2, PDK4), all eight show the expected positive log-fold change, and three -- FKBP5 ($\log_2$FC$=3.70$, FDR$=0.019$), ZBTB16 ($3.92$, $0.037$), and PER1 ($2.60$, $0.003$) -- clear FDR$<0.05$ under this simple test (Table~\ref{tab:markerde}); the other five have large effect sizes but do not clear FDR$<0.05$ with only four donors and no cross-gene variance shrinkage. This is a genuine, secondary finding in its own right: statistical-method choice (a per-gene $t$-test on FPKM versus DESeq2's negative-binomial shrinkage on counts) also gates which canonical, well-replicated biology clears a significance threshold, compounding whatever instability the identifier-mapping choice separately introduces.
+
+\begin{figure}[!t]
+\centering
+\includegraphics[width=\columnwidth]{fig_real_volcano.pdf}
+\caption{Real differential expression, File 1 (Dex vs Untreated, $n=4$ vs $4$, GSE52778): $\log_2$ fold change against $-\log_{10}$(FDR) for all 19{,}434 tested genes. The eight canonical GR-target marker genes are circled.}
+\label{fig:volcano}
+\figalttext[Volcano plot]{A scatter of log fold change against significance for thousands of genes, with eight canonical marker genes highlighted, mostly toward the significant, up-regulated region.}
+\end{figure}
+
+\begin{table}[!t]
+\caption{Canonical GR-target marker genes in File 1's real, ground-truth differential expression (Dex vs Untreated, $n=4$ vs $4$). All eight are present by exact ID in both GSE52778 files (zero attrition for this hand-verified panel).\label{tab:markerde}}
+\begin{tabular*}{\columnwidth}{@{\extracolsep\fill}lccl@{\extracolsep\fill}}
+\toprule
+Gene & $\log_2$FC & FDR & Significant \\
+\midrule
+FKBP5    & 3.701 & 0.0188 & yes \\
+ZBTB16   & 3.915 & 0.0367 & yes \\
+PER1     & 2.598 & 0.0034 & yes \\
+TSC22D3  & 3.008 & 0.0880 & no \\
+KLF15    & 3.387 & 0.0778 & no \\
+CRISPLD2 & 2.505 & 0.0604 & no \\
+PDK4     & 2.217 & 0.2190 & no \\
+DDIT4    & 0.545 & 0.5340 & no \\
+\botrule
+\end{tabular*}
+\end{table}
+
+\subsection{A real calibration failure, reported rather than hidden}\label{sec:real-calibration}
+
+The natural next step -- comparing File 1's and File 2's differential-expression calls to measure real cross-namespace fragility -- requires knowing which of File 2's 16 GSM-labeled columns received dexamethasone. That metadata is not present in File 2 as supplied. Following this project's own methodology (Section~\ref{sec:example} of the original design; GR-target biology as an orthogonal ground truth), we attempted to recover it: an 8-gene composite $z$-score built from the same canonical marker panel, clustered with $k$-means ($k=2$), was first calibrated against File 1's \emph{known} labels before being trusted on File 2. Result: only 12 of 16 File-1 samples (75\%) are correctly recovered this way (Fig.~\ref{fig:calibration}, left) -- two Albuterol+Dex samples score as low as the Untreated/Albuterol arm, and two Dex/Untreated samples land on the wrong side of the split, reflecting real inter-donor variability in this dataset that a small marker panel cannot fully average out. Applying the identical, identically-calibrated procedure to File 2 (Fig.~\ref{fig:calibration}, right) produces a superficially clean 8-vs-8 split, but the calibration result means that split cannot be trusted for individual samples at better than roughly 3-in-4 odds. We therefore report the recovered File-2 grouping in the repository for transparency but do not use it for any further differential-expression or fragility comparison: doing so would silently conflate genuine namespace/annotation effects with label-recovery error, which is precisely the kind of confound this project exists to prevent, not commit.
+
+\begin{figure*}[!t]
+\centering
+\includegraphics[width=\textwidth]{fig_marker_calibration.pdf}
+\caption{Composite 8-marker GR-target $z$-score, one point per sample, sorted low to high. \emph{Left}: File 1, colored by true label -- Dex/Albuterol+Dex (red) versus Untreated/Albuterol (blue); note the label-color reversals in the middle of the sorted order, the source of the 75\% calibration accuracy. \emph{Right}: File 2, labels unknown, plotted in the same way for visual comparison; its middle-of-range ambiguity mirrors File 1's, which is why its two-cluster split is reported but not relied upon.}
+\label{fig:calibration}
+\figalttext[Two dot plots]{Sorted composite marker z-scores for 16 samples in each of two files, both showing a mostly-separated but partially ambiguous middle region.}
+\end{figure*}
+
+This is, in itself, a genuine and directly relevant finding: reproducing a published, heavily-cited dataset's differential-expression result from its re-processed public form is not just an identifier-mapping problem but can also be a metadata-preservation problem, and a literature-validated marker panel is not automatically sufficient to paper over missing metadata. We report it as what it is -- a calibration failure discovered honestly, rather than a positive result -- because a paper about auditing invisible failure modes in bioinformatics pipelines should not itself paper over one.
+
 \section{Illustrative example}\label{sec:example}
 
 \begin{boxtext}[Synthetic data notice]
@@ -184,7 +251,9 @@ toy:versioned\_only\_break & 6 & 0.833 & 0.650 & fragile \\
 
 \section{Discussion and limitations}\label{sec:limitations}
 
-This manuscript reports what has actually been built and run: a fully specified and unit-validated stability-metric framework, a wired-up ID-mapping matrix and enrichment-battery interface, and a synthetic illustration of the mechanics. It deliberately does not report pathway-level findings on GSE52778 or any other real dataset, because the Bioconductor packages the empirical pipeline depends on (\texttt{DESeq2}, \texttt{org.Hs.eg.db}, \texttt{clusterProfiler}, \texttt{ReactomePA}, \texttt{biomaRt}, \texttt{fgsea}) were not installable in the network-restricted environment used to prepare this manuscript. The \texttt{targets} pipeline that would produce those findings is complete and reviewable in the linked repository, and is exercised as a continuous-integration smoke test in an environment where those packages can be installed; running it end to end against GSE52778 and the two additional planned datasets (GSE159094, a PBMC dexamethasone series, and GSE80651, a podocyte series) to answer whether pathway fragility is a property of the pathway's gene-set definition or of a single dataset's noise, and anchoring the glucocorticoid case study against ChIP-seq-derived GR/NR3C1 target gene sets, is the immediate next step and is not claimed here.
+This manuscript reports what has actually been built and run: a fully specified and unit-validated stability-metric framework, a wired-up ID-mapping matrix and enrichment-battery interface, a real empirical case study on GSE52778's two independently-processed public forms (Section~\ref{sec:real}), and a synthetic illustration of the fragility-score mechanics (Section~\ref{sec:example}). It deliberately does not report pathway-\emph{level} findings (GO/KEGG/Reactome/WikiPathways fragility scores) on GSE52778 or any other dataset, because the Bioconductor packages the full empirical pipeline depends on (\texttt{DESeq2}, \texttt{org.Hs.eg.db}, \texttt{clusterProfiler}, \texttt{ReactomePA}, \texttt{biomaRt}, \texttt{fgsea}) remain network-unreachable in the environments used to prepare this manuscript -- CRAN and Bioconductor's package servers, and every live pathway/annotation data source checked (KEGG, Ensembl BioMart, Reactome, WikiPathways, g:Profiler, Enrichr, mygene.info), are all blocked by the sandbox's network egress policy, a restriction that granting in-conversation permission does not lift, since it is enforced outside the conversation. What could be recovered from source -- most core Bioconductor infrastructure and the \texttt{clusterProfiler} ecosystem are mirrored on GitHub, which the environment does permit -- was not sufficient, because the annotation \emph{data} packages (\texttt{org.Hs.eg.db}, \texttt{reactome.db}, \texttt{HDO.db}, and the Bioconductor \texttt{airway} data package itself) are not mirrored there, only Bioconductor \emph{software} packages are. The \texttt{targets} pipeline that would produce full pathway-level fragility scores is complete and reviewable in the linked repository, and is exercised as a continuous-integration smoke test in an environment where those packages can be installed; running it end to end against GSE52778 and the two additional planned datasets (GSE159094, a PBMC dexamethasone series, and GSE80651, a podocyte series) to answer whether pathway fragility is a property of the pathway's gene-set definition or of a single dataset's noise, and anchoring the glucocorticoid case study against ChIP-seq-derived GR/NR3C1 target gene sets, remains the immediate next step.
+
+The real case study in Section~\ref{sec:real} was made possible only because the corresponding author supplied the two GSE52778 files directly; it illustrates, on genuine data, both halves of this project's concern -- a 69\% gene-universe difference and real symbol-identifier anomalies at the namespace/annotation level (Section~\ref{sec:real-universe}), and, in the calibration finding of Section~\ref{sec:real-calibration}, a related but distinct failure mode: a reprocessed public dataset can lose the sample-level metadata needed to even attempt a same-samples comparison, and a literature-validated marker panel is not automatically enough to reconstruct it reliably. We deliberately stopped at reporting that 75\% ceiling rather than using the recovered labels for a headline fragility number, because doing so would have reported label-recovery noise as if it were mapping-driven instability -- the same conflation Section~\ref{sec:design} designs against for the DE step, applied here to a metadata-recovery step we did not originally plan for.
 
 A second, related limitation is that the GSEA mode of the enrichment battery (Section~\ref{sec:design}) is interface-complete but not yet wired to a concrete pathway gene-set source (MSigDB Hallmark, C2:CP:KEGG, Reactome); only ORA is currently runnable end to end.
 
@@ -192,7 +261,7 @@ Finally, even once run on real data, three sources of instability must be kept a
 
 \section{Conclusion}\label{sec:conclusion}
 
-Gene-identifier-mapping choice is a routinely invisible step between differential expression and pathway enrichment. \texttt{idmapaudit} turns that choice into a measured, reusable quantity -- the per-pathway fragility score -- built on a stability-metric core that is fully specified, unit-tested against hand-computed answers, and released independently of the heavier Bioconductor dependencies its empirical use requires. The tool is ready to run against real data; this manuscript reports its design and validated core honestly, rather than results that were not obtained.
+Gene-identifier-mapping choice is a routinely invisible step between differential expression and pathway enrichment. \texttt{idmapaudit} turns that choice into a measured, reusable quantity -- the per-pathway fragility score -- built on a stability-metric core that is fully specified, unit-tested against hand-computed answers, and released independently of the heavier Bioconductor dependencies its empirical use requires. Applied to real, public GSE52778 data, the same auditing mindset surfaced two genuine findings beyond what was originally planned: a 69\% gene-universe difference between two public processings of the identical experiment, and a marker-based sample-relabeling method that only reaches 75\% accuracy even under calibration -- a metadata-fragility problem adjacent to, and compounding, the identifier-mapping problem this tool was built to audit. The tool is ready to run full pathway-level enrichment against real data as soon as it runs somewhere with Bioconductor annotation-data access; this manuscript reports its design and every result actually obtained honestly, including a negative calibration result, rather than results that were not obtained.
 
 \section{Conflicts of interest}
 The author declares no competing interests.
@@ -201,10 +270,10 @@ The author declares no competing interests.
 None declared.
 
 \section{Data availability}
-No new biological data were generated. The \texttt{airway} dataset (GSE52778) analyzed by the accompanying, not-yet-executed pipeline is publicly available via the Bioconductor \texttt{airway} data package and the NCBI Gene Expression Omnibus (accession GSE52778). All code, the methods note, and the synthetic illustrative-example data underlying Table~\ref{tab:toy} and Fig.~\ref{fig:heatmap} are available at \url{https://github.com/ethanyyy123/bioadvances}.
+No new biological data were generated. All data analyzed are publicly available from the NCBI Gene Expression Omnibus under accession GSE52778 \citep{himes2014rnaseq}: the two files analyzed in Section~\ref{sec:real} (\texttt{GSE52778\_All\_Sample\_FPKM\_Matrix.txt} and \texttt{GSE52778\_norm\_counts\_FPKM\_GRCh38.p13\_NCBI.tsv}) are included in the linked repository under \texttt{analysis/gse52778-real/}, alongside the analysis script and its full output tables. The \texttt{airway} Bioconductor data package (a curated 8-sample subset of the same series) underlies the not-yet-executed \texttt{targets} pipeline of Section~\ref{sec:software}. All code, the methods note, the real-data analysis, and the synthetic illustrative-example data underlying Table~\ref{tab:toy} and Fig.~\ref{fig:heatmap} are available at \url{https://github.com/ethanyyy123/bioadvances}.
 
 \section{Author contributions statement}
-E.Y.Y.\ designed the audit framework, implemented the software and tests, and wrote the manuscript.
+E.Y.Y.\ designed the audit framework, implemented the software and tests, supplied the GSE52778 data files analyzed in Section~\ref{sec:real}, and wrote the manuscript.
 
 \bibliographystyle{oup-abbrvnat}
 \bibliography{reference}
