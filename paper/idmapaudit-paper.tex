@@ -1,0 +1,212 @@
+%%
+%% idmapaudit manuscript, built from the OUP oup-authoring-template bundle.
+%%
+\documentclass[unnumsec,webpdf,contemporary,large]{oup-authoring-template}
+
+\graphicspath{{Fig/}}
+\newcommand{\societylogo}{}
+
+\theoremstyle{thmstyleone}%
+\newtheorem{theorem}{Theorem}%
+\newtheorem{proposition}[theorem]{Proposition}%
+\theoremstyle{thmstyletwo}%
+\newtheorem{example}{Example}%
+\newtheorem{remark}{Remark}%
+\theoremstyle{thmstylethree}%
+\newtheorem{definition}{Definition}
+
+\usepackage{booktabs}
+
+\begin{document}
+
+\journaltitle{Bioinformatics Advances}
+\DOI{DOI added during production}
+\copyrightyear{2026}
+\pubyear{2026}
+\access{Preprint}
+\appnotes{Application Note}
+
+\firstpage{1}
+
+\title[idmapaudit: auditing gene-ID-mapping sensitivity]{idmapaudit: an audit framework for gene-identifier-mapping sensitivity in pathway enrichment analysis}
+
+\author[1,$\ast$]{Ethan Y.\ Ye}
+
+\address[1]{\orgdiv{}, \orgname{Independent Researcher}, \orgaddress{\country{}}}
+
+\corresp[$\ast$]{Corresponding author. \href{mailto:ethan.ye.201010@gmail.com}{ethan.ye.201010@gmail.com}}
+
+\abstract{
+\textbf{Motivation:} Every RNA-seq-to-pathway-enrichment pipeline makes a choice that is rarely audited: which gene-identifier namespace (Ensembl, Entrez, HGNC symbol) to run enrichment in, and how to resolve genes that do not map cleanly between namespaces. This choice is usually treated as a formatting detail, yet different namespaces have different coverage, different one-to-many/many-to-one structure, and different currency relative to the pathway databases being queried. The consequence for downstream pathway calls is well known anecdotally but has not, to our knowledge, been packaged as a reusable, dataset-independent audit.\\
+\textbf{Results:} We present \texttt{idmapaudit}, an R package and \texttt{targets} pipeline that holds a differential expression result fixed and varies only the gene-ID-mapping strategy used to build the enrichment query list and background, across the primary Ensembl/Entrez/Symbol namespace choice and the one-to-many resolution policy (drop, first-hit, or keep-all). For every pathway it reports a fragility score -- the fraction of mapping branches in which the pathway is called significant -- together with an entropy-based index that treats ``always significant'' and ``never significant'' as equally stable and mid-range scores as fragile, a gene-attrition regression to attribute instability to specific mapping failures, and a mapping-noise null model that separates mapping-\emph{structure}-driven instability from what finite-list-size sampling alone would produce. The core stability-metric and mapping-resolution logic is implemented independently of any Bioconductor dependency and is exercised by 26 unit tests (111 expectations) against hand-computed known-answer cases, all currently passing. We illustrate the framework's mechanics on a small synthetic worked example; the empirical case study on the airway dexamethasone dataset (GSE52778) is fully wired into the accompanying \texttt{targets} pipeline but has not yet been executed in the environment this manuscript was prepared in, and no biological findings are claimed here.\\
+\textbf{Availability:} Source code, the full methods note, and the \texttt{targets} pipeline are available at \url{https://github.com/ethanyyy123/bioadvances} under the MIT license.\\
+\textbf{Contact:} \href{mailto:ethan.ye.201010@gmail.com}{ethan.ye.201010@gmail.com}\\
+\textbf{Supplementary information:} The per-pathway fragility lookup table format, the synthetic worked example data, and the unit-test suite are included in the linked repository.}
+
+\keywords{pathway enrichment, gene identifier mapping, reproducibility, differential expression, Bioconductor}
+
+\maketitle
+
+\section{Introduction}\label{sec:intro}
+
+A standard RNA-seq analysis ends with a list of pathways reported as significantly enriched among differentially expressed genes. Between the differential expression (DE) step and that list sits a step that is almost never discussed in Methods sections: the DE result's gene identifiers (typically Ensembl gene IDs, since that is what most aligners and quantifiers emit) must be translated into whatever namespace the chosen pathway database indexes on, and that translation is lossy. Genes fail to map; genes map to more than one identifier in the target namespace; and the choice of which resolution policy to apply to that ambiguity (drop the gene, keep an arbitrary first hit, or keep every hit) is rarely stated, let alone justified.
+
+The scale of the problem is not in dispute. \citet{wadi2016outdated} showed that stale Gene Ontology annotations measurably change enrichment calls, and the Bioconductor support forums carry a large, informal record of users losing 20--45\% of a gene list on Ensembl-to-Entrez conversion with no systematic accounting of the downstream pathway-level consequences. What is missing is not awareness that the problem exists, but a reusable instrument for measuring it: something that fixes everything else in a DE-to-enrichment pipeline, varies only the identifier-mapping strategy, and reports which pathway calls are artifacts of that choice rather than of the underlying biology.
+
+The closest published work is \citet{xie2023dexbenchmark}'s Dex-Benchmark, which uses dexamethasone perturbation data and ChIP-seq-derived glucocorticoid-receptor (GR/NR3C1) target gene sets as a silver-standard concordance check -- but to benchmark differential-expression \emph{algorithm} choice (DESeq2 versus limma versus other methods), with the identifier space fixed throughout. \texttt{idmapaudit} inverts that design: it fixes the DE algorithm and result, and varies only the identifier-mapping step, producing a per-pathway \emph{fragility score} that is, to our knowledge, the first attempt to turn "ID mapping is lossy" and "enrichment is sensitive to its inputs" -- two facts usually stated separately -- into a single, quantified, dataset-independent audit.
+
+This paper describes the design and the currently implemented and validated portion of that audit tool. Consistent with treating validity claims carefully, we report only what has actually been run: the core stability-metric logic, unit-tested against hand-derived answers, and a small synthetic worked example that demonstrates the mechanics of the fragility score. The empirical case study against the airway glucocorticoid-response dataset (GSE52778; \citealp{himes2014rnaseq}) is fully specified and implemented as a \texttt{targets} pipeline (Section~\ref{sec:limitations}) but requires a Bioconductor software stack that was not available in the compute environment used to prepare this manuscript, and so is reported here as planned and implemented, not as executed.
+
+\section{Methods}\label{sec:methods}
+
+\subsection{Design: one fixed input, one manipulated variable}\label{sec:design}
+
+The audit holds three things fixed and manipulates exactly one. Fixed: (i) the differential expression step, run once per dataset in the native (unversioned Ensembl) identifier space produced by the quantifier, using \texttt{DESeq2} \citep{love2014deseq2} with a standard count-threshold filter and a single named contrast; (ii) the enrichment battery applied to every branch -- over-representation analysis (ORA) via \texttt{clusterProfiler} \citep{yu2012clusterprofiler} and \texttt{ReactomePA} \citep{yu2016reactomepa} against GO Biological Process \citep{ashburner2000go}, KEGG \citep{kanehisa2000kegg}, Reactome \citep{fabregat2018reactome}, and WikiPathways \citep{martens2021wikipathways}, with gene set enrichment analysis (GSEA; \citealp{subramanian2005gsea}) via \texttt{fgsea} \citep{korotkevich2021fgsea} planned as a second mode; and (iii) the false-discovery-rate procedure, applied independently within every branch rather than pooled across branches. Manipulated: the identifier-mapping branch used to build the enrichment query list and its background from the DE step's fixed output.
+
+Running the DE step once, rather than once per branch, is a deliberate choice: it isolates identifier-mapping as the sole manipulated variable instead of confounding it with re-computed differential-expression statistics. A referee's first instinct is often "did you just rediscover that different DE methods disagree" -- this design rules that out by construction.
+
+\subsection{The ID-mapping matrix}\label{sec:matrix}
+
+The primary factor is namespace choice, implemented as a set of \emph{resolvers} -- functions that take the union of a DE result's query and background gene lists and return every raw (possibly one-to-many) mapping edge into a target namespace:
+
+\begin{unlist}
+\item unversioned Ensembl gene ID (native; identity mapping);
+\item versioned Ensembl gene ID (\texttt{ENSG00000141510.16}) -- deliberately included as a positive control, since silently failing to strip version suffixes is a common real-world bug that should produce dramatic, almost trivial instability against any pathway database keyed on the unversioned ID;
+\item Entrez Gene ID via \texttt{org.Hs.eg.db}/\texttt{AnnotationDbi} \citep{huber2015bioconductor};
+\item HGNC/official symbol via \texttt{org.Hs.eg.db}; and
+\item HGNC/official symbol via \texttt{biomaRt} \citep{durinck2009biomart} -- a second resolver for nominally the same namespace as (iv), included because the two can legitimately disagree, which is itself a reportable finding rather than a bug to reconcile.
+\end{unlist}
+
+A secondary factor, the one-to-many/many-to-one \emph{resolution policy}, is applied only to the Entrez and org.Hs.eg.db-symbol resolvers, where ambiguity is common: \textbf{drop} removes any native ID with more than one distinct target; \textbf{first} keeps the first-seen target per native ID; \textbf{list} keeps every edge, exploding one-to-many keys into duplicate rows. This is deliberately kept as a small sub-experiment restricted to two resolvers rather than folded into a full second factorial, since the full cross of namespaces $\times$ policies $\times$ databases $\times$ modes produces more cells than can be interpreted cleanly.
+
+For every resulting branch, the query list and the background list are mapped \emph{independently}, and their attrition rates are reported separately (Eq.~\ref{eq:attrition}). This matters because a gene that fails to map is invisible to both the query and the background simultaneously, and conflating the two effects would hide which one is doing the work:
+\begin{equation}
+\mathrm{Attrition}_b = 1 - \frac{|\,\mathrm{map}_b(G) \cap \mathrm{keys}(\mathrm{map}_b)\,|}{|G|},
+\label{eq:attrition}
+\end{equation}
+computed once for the query list $G = G_{\mathrm{sig}}$ and once for the background.
+
+\subsection{The audit / fragility score}\label{sec:fragility}
+
+For a pathway $p$ tested in $k_p$ of the $k$ mapping branches (branches where $p$ has zero mapped genes are excluded from the denominator entirely, not counted as "not significant"), let $\mathrm{sig}_{p,b}\in\{0,1\}$ indicate whether $p$ is called significant at FDR $<\alpha$ in branch $b$. The fragility proportion is
+\begin{equation}
+F_p = \frac{1}{k_p}\sum_{b} \mathrm{sig}_{p,b} \in [0,1].
+\label{eq:fragility}
+\end{equation}
+$F_p$ near 0 or near 1 both indicate stability (stably absent, stably present); values in between indicate a call that depends on the mapping branch. To make "how stable" a single, symmetric number, we report the binary entropy
+\begin{equation}
+H_p = -F_p\log_2 F_p - (1-F_p)\log_2(1-F_p),
+\label{eq:entropy}
+\end{equation}
+with the convention $0\log_2 0 := 0$, and the Bernoulli variance $V_p = F_p(1-F_p)$ as a monotone-equivalent alternative. Both are 0 at $F_p\in\{0,1\}$ and maximal at $F_p=0.5$ (Fig.~\ref{fig:curve}); a pathway significant in 5 of 6 branches ($F_p=5/6$, $H_p\approx0.650$) is thereby scored as \emph{less} fragile than one significant in 3 of 6 ($F_p=0.5$, $H_p=1$), rather than treating any mid-range hit as equally unstable. Pathways are classified \textbf{stable} if $F_p\le\tau_{lo}$ or $F_p\ge\tau_{hi}$ and \textbf{fragile} otherwise, with default thresholds $\tau_{lo}=0.1$, $\tau_{hi}=0.9$.
+
+Two further pieces complete the framework and are implemented but not exercised on real data in this manuscript (Section~\ref{sec:limitations}): a gene-attrition regression that relates $H_p$ to the branch-level attrition rate (Eq.~\ref{eq:attrition}) to attribute pathway-level instability to specific mapping failures, separately for query-list and background-list attrition; and a cross-dataset agreement statistic (simple agreement rate and Fleiss' $\kappa$; \citealp{fleiss1971kappa}) for asking whether a pathway's stable/fragile classification is a property of its gene-set definition (reproducible across biologically independent datasets) or of one dataset's noise.
+
+\subsection{Mapping-noise null}\label{sec:null}
+
+A pathway's raw $H_p$ conflates two effects: instability caused by the specific, non-random genes that a given mapping strategy fails to translate, and instability that any finite-size random gene-list perturbation of the same magnitude would produce regardless of which genes were dropped. To isolate the first from the second, for a branch with observed attrition rate $\pi_b$ we draw $R$ replicates in which $\lfloor \pi_b n\rfloor$ genes are removed from the query list \emph{uniformly at random} (and likewise for the background), recompute the same stability statistics on each replicate, and report the observed statistic's excess over the resulting null distribution:
+\begin{equation}
+\mathrm{excess} = x_{\mathrm{obs}} - \mathrm{median}(x_{\mathrm{null}}^{(1..R)}), \quad
+z = \frac{x_{\mathrm{obs}}-\overline{x_{\mathrm{null}}}}{\mathrm{sd}(x_{\mathrm{null}})}.
+\label{eq:excess}
+\end{equation}
+Only the excess, not the raw statistic, supports a claim that instability is driven by the \emph{structure} of real mapping failures (poorly annotated or recently renamed genes drop out disproportionately) rather than by list size alone.
+
+\section{Software implementation}\label{sec:software}
+
+\texttt{idmapaudit} is an R package with four modules. \texttt{R/stability-metrics.R} implements Eqs.~\ref{eq:attrition}--\ref{eq:excess} and the set-level Jaccard/overlap-coefficient and Spearman rank-concordance statistics used to compare significant-pathway sets pairwise across branches; it has no Bioconductor dependency. \texttt{R/mapping-matrix.R} implements the drop/first/list resolution policies and the per-branch query/background mapping builder described in Section~\ref{sec:matrix}. \texttt{R/enrichment-battery.R} wraps the ORA calls and generates mapping-noise-null replicates (Section~\ref{sec:null}); it declares \texttt{clusterProfiler}, \texttt{ReactomePA}, \texttt{org.Hs.eg.db}, \texttt{AnnotationDbi}, \texttt{biomaRt}, and \texttt{fgsea} as \texttt{Suggests} rather than hard dependencies, so the core metric logic can be tested and used without installing the full annotation/enrichment stack. \texttt{R/fragility-lookup.R} builds and exports the per-pathway fragility table as a flat TSV file -- the tool's intended reusable, community-facing artifact.
+
+An accompanying \texttt{targets} pipeline \citep{landau2021targets} orchestrates the airway prototype end to end: a fixed \texttt{DESeq2} contrast on the \texttt{airway} \citep{morgan2020summarizedexperiment,himes2014rnaseq} count matrix, the five resolvers of Section~\ref{sec:matrix} with the Entrez/Symbol resolution-policy sub-branches, the ORA battery over four pathway databases, and the resulting fragility table. Continuous integration runs a fast pure-R unit-test job on every push and a second job that installs the full Bioconductor stack and executes this pipeline as a smoke test.
+
+\section{Validation}\label{sec:validation}
+
+Because the stability-metric layer (Section~\ref{sec:fragility}) is pure R with no external numerical dependency, every function is unit-tested against a hand-derived, closed-form answer rather than only checked to "run without error." Table~\ref{tab:tests} reports the actual test-suite output from this manuscript's accompanying repository, run with \texttt{testthat} \citep{wickham2011testthat}. All 26 test cases (111 individual expectations) currently pass, including a regression test for a one-to-many mapping bug -- an earlier implementation used named-vector indexing to look up mapped identifiers, which under R's \texttt{[} semantics silently keeps only the first match for a duplicated key, exactly the kind of silent failure this tool exists to catch. The bug was found and fixed while writing that test, not left as a known issue.
+
+\begin{table}[!t]
+\caption{Unit-test suite results for the pure-R stability-metric and mapping-resolution-policy logic (\texttt{idmapaudit} R package, this manuscript's accompanying repository). Every listed expectation checks a function's output against an independently hand-computed value, not merely successful execution.\label{tab:tests}}
+\begin{tabular*}{\columnwidth}{@{\extracolsep\fill}lccc@{\extracolsep\fill}}
+\toprule
+Test file & Expectations & Passed & Failed \\
+\midrule
+stability-metrics   & 52  & 52  & 0 \\
+enrichment-battery  & 29  & 29  & 0 \\
+mapping-matrix      & 20  & 20  & 0 \\
+fragility-lookup    & 10  & 10  & 0 \\
+\midrule
+\textbf{Total}      & \textbf{111} & \textbf{111} & \textbf{0} \\
+\botrule
+\end{tabular*}
+\end{table}
+
+Figure~\ref{fig:curve} plots the entropy and (rescaled) variance forms of the fragility index as a function of the fragility proportion $F_p$ (Eq.~\ref{eq:entropy}) -- a directly computed mathematical function of the definitions in Section~\ref{sec:fragility}, not a fit to any dataset -- showing both indices' symmetry around $F_p=0.5$ and the default stability thresholds $\tau_{lo}, \tau_{hi}$.
+
+\begin{figure}[!t]
+\centering
+\includegraphics[width=\columnwidth]{fig_fragility_curve.pdf}
+\caption{The fragility index as a function of the fragility proportion $F_p$: binary entropy $H_p$ (solid) and $4V_p$, the Bernoulli variance rescaled to $[0,1]$ for comparison (dashed). Both vanish at $F_p\in\{0,1\}$ (stably absent / stably present) and peak at $F_p=0.5$ (maximally fragile). Dotted lines mark the default classification thresholds $\tau_{lo}=0.1$, $\tau_{hi}=0.9$.}
+\label{fig:curve}
+\figalttext[Line plot of two curves]{Two symmetric curves peaking at F=0.5 and equal to zero at F=0 and F=1, one solid (entropy) and one dashed (rescaled variance), with vertical dotted reference lines at F=0.1 and F=0.9.}
+\end{figure}
+
+\section{Illustrative example}\label{sec:example}
+
+\begin{boxtext}[Synthetic data notice]
+Every number in this section is computed by the real \texttt{idmapaudit} functions described in Section~\ref{sec:fragility}, but the input significance calls themselves are hand-constructed toy data chosen to illustrate the three regimes the fragility score is designed to separate. They are \emph{not} derived from GSE52778, from any other real dataset, or from any real pathway database, and the pathway labels (\texttt{toy:*}) are placeholders, not real pathway identifiers. No biological claim should be attributed to this section.
+\end{boxtext}
+
+Fig.~\ref{fig:heatmap} shows a synthetic significance matrix for eight toy pathways across the six primary mapping branches of Section~\ref{sec:matrix}, and Table~\ref{tab:toy} shows the resulting fragility table, produced by \texttt{build\_fragility\_table()} on that matrix without modification. \texttt{toy:always\_on} and \texttt{toy:always\_off} are stable by construction ($H_p=0$); \texttt{toy:coin\_flip\_a/b} alternate every other branch, giving the maximal fragility $F_p=0.5$, $H_p=1$; the remaining four pathways each flip in exactly one of six branches ($F_p\in\{1/6,5/6\}$, $H_p\approx0.650$), illustrating a single-branch-driven fragility case -- exactly the pattern the versioned-Ensembl positive control (Section~\ref{sec:matrix}) is expected to produce at scale on real data. The mean pairwise Jaccard index of the significant-pathway sets across all $\binom{6}{2}=15$ branch pairs in this toy example is 0.591, reflecting that 6 of 8 toy pathways are not called consistently across every branch pair.
+
+\begin{figure}[!t]
+\centering
+\includegraphics[width=\columnwidth]{fig_toy_heatmap.pdf}
+\caption{Synthetic significance-call matrix (dark = significant) for eight illustrative toy pathways across six illustrative mapping branches. Hand-constructed to demonstrate the score's mechanics; not derived from real data (see boxed notice, Section~\ref{sec:example}).}
+\label{fig:heatmap}
+\figalttext[Binary heatmap]{An eight-row by six-column grid of dark and light cells representing synthetic significance calls, used only to illustrate the fragility-score calculation.}
+\end{figure}
+
+\begin{table}[!t]
+\caption{Fragility table for the synthetic illustrative example (Fig.~\ref{fig:heatmap}), computed by \texttt{idmapaudit::build\_fragility\_table()}. $k_p$: testable branches; $F_p$: fragility proportion (Eq.~\ref{eq:fragility}); $H_p$: binary entropy (Eq.~\ref{eq:entropy}).\label{tab:toy}}
+\begin{tabular*}{\columnwidth}{@{\extracolsep\fill}lcccl@{\extracolsep\fill}}
+\toprule
+Pathway (synthetic) & $k_p$ & $F_p$ & $H_p$ & Class \\
+\midrule
+toy:always\_on           & 6 & 1.000 & 0.000 & stable \\
+toy:always\_off          & 6 & 0.000 & 0.000 & stable \\
+toy:coin\_flip\_a        & 6 & 0.500 & 1.000 & fragile \\
+toy:coin\_flip\_b        & 6 & 0.500 & 1.000 & fragile \\
+toy:entrez\_split        & 6 & 0.833 & 0.650 & fragile \\
+toy:mostly\_off          & 6 & 0.167 & 0.650 & fragile \\
+toy:symbol\_disagree     & 6 & 0.833 & 0.650 & fragile \\
+toy:versioned\_only\_break & 6 & 0.833 & 0.650 & fragile \\
+\botrule
+\end{tabular*}
+\end{table}
+
+\section{Discussion and limitations}\label{sec:limitations}
+
+This manuscript reports what has actually been built and run: a fully specified and unit-validated stability-metric framework, a wired-up ID-mapping matrix and enrichment-battery interface, and a synthetic illustration of the mechanics. It deliberately does not report pathway-level findings on GSE52778 or any other real dataset, because the Bioconductor packages the empirical pipeline depends on (\texttt{DESeq2}, \texttt{org.Hs.eg.db}, \texttt{clusterProfiler}, \texttt{ReactomePA}, \texttt{biomaRt}, \texttt{fgsea}) were not installable in the network-restricted environment used to prepare this manuscript. The \texttt{targets} pipeline that would produce those findings is complete and reviewable in the linked repository, and is exercised as a continuous-integration smoke test in an environment where those packages can be installed; running it end to end against GSE52778 and the two additional planned datasets (GSE159094, a PBMC dexamethasone series, and GSE80651, a podocyte series) to answer whether pathway fragility is a property of the pathway's gene-set definition or of a single dataset's noise, and anchoring the glucocorticoid case study against ChIP-seq-derived GR/NR3C1 target gene sets, is the immediate next step and is not claimed here.
+
+A second, related limitation is that the GSEA mode of the enrichment battery (Section~\ref{sec:design}) is interface-complete but not yet wired to a concrete pathway gene-set source (MSigDB Hallmark, C2:CP:KEGG, Reactome); only ORA is currently runnable end to end.
+
+Finally, even once run on real data, three sources of instability must be kept analytically separate, as argued in Section~\ref{sec:fragility}: mapping-driven fragility, threshold-proximity flips that have nothing to do with identifier choice, and dataset-specific noise versus a pathway-intrinsic property. The framework reports the machinery to make each separation (threshold-sensitivity reporting, the mapping-noise null, and cross-dataset agreement), but none of that machinery substitutes for actually running it against real, independent datasets, which is future work.
+
+\section{Conclusion}\label{sec:conclusion}
+
+Gene-identifier-mapping choice is a routinely invisible step between differential expression and pathway enrichment. \texttt{idmapaudit} turns that choice into a measured, reusable quantity -- the per-pathway fragility score -- built on a stability-metric core that is fully specified, unit-tested against hand-computed answers, and released independently of the heavier Bioconductor dependencies its empirical use requires. The tool is ready to run against real data; this manuscript reports its design and validated core honestly, rather than results that were not obtained.
+
+\section{Conflicts of interest}
+The author declares no competing interests.
+
+\section{Funding}
+None declared.
+
+\section{Data availability}
+No new biological data were generated. The \texttt{airway} dataset (GSE52778) analyzed by the accompanying, not-yet-executed pipeline is publicly available via the Bioconductor \texttt{airway} data package and the NCBI Gene Expression Omnibus (accession GSE52778). All code, the methods note, and the synthetic illustrative-example data underlying Table~\ref{tab:toy} and Fig.~\ref{fig:heatmap} are available at \url{https://github.com/ethanyyy123/bioadvances}.
+
+\section{Author contributions statement}
+E.Y.Y.\ designed the audit framework, implemented the software and tests, and wrote the manuscript.
+
+\bibliographystyle{oup-abbrvnat}
+\bibliography{reference}
+
+\end{document}

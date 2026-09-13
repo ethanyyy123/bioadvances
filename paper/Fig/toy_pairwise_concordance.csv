@@ -1,0 +1,16 @@
+"branch_a","branch_b","jaccard","overlap"
+"ens_unversioned","ens_versioned",0.5,0.75
+"ens_unversioned","entrez_first",0.666666666666667,0.8
+"ens_unversioned","entrez_list",0.666666666666667,0.8
+"ens_unversioned","symbol_orgdb",1,1
+"ens_unversioned","symbol_biomart",0.5,0.75
+"ens_versioned","entrez_first",0.285714285714286,0.5
+"ens_versioned","entrez_list",0.8,1
+"ens_versioned","symbol_orgdb",0.5,0.75
+"ens_versioned","symbol_biomart",0.6,0.75
+"entrez_first","entrez_list",0.428571428571429,0.6
+"entrez_first","symbol_orgdb",0.666666666666667,0.8
+"entrez_first","symbol_biomart",0.285714285714286,0.5
+"entrez_list","symbol_orgdb",0.666666666666667,0.8
+"entrez_list","symbol_biomart",0.8,1
+"symbol_orgdb","symbol_biomart",0.5,0.75
