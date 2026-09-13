@@ -1,0 +1,19 @@
+# R
+.Rhistory
+.RData
+.Ruserdata
+*.Rproj.user/
+
+# targets pipeline cache (regenerable; not committed per plan §6 data/results
+# separation — raw data and heavy intermediates stay out of git)
+analysis/*/_targets/
+
+# large raw data dropped into data/ for local runs (GEO downloads etc.) —
+# never committed; results/ is deliberately NOT ignored (plan §6: the
+# fragility lookup table is the tool's headline reusable artifact and
+# should be committed once generated, not hidden in a figure or a .gitignore)
+data/*
+!data/.gitkeep
+
+# OS cruft
+.DS_Store

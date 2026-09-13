@@ -1,0 +1,38 @@
+Package: idmapaudit
+Title: Audit the Sensitivity of Pathway Enrichment to Gene-ID-Mapping Choice
+Version: 0.0.0.9000
+Authors@R: person("Ethan", "Ye", email = "ethan.ye.201010@gmail.com", role = c("aut", "cre"))
+Description: Given a fixed differential expression result, idmapaudit varies
+    only the gene-identifier-mapping strategy used to build the enrichment
+    query list and background (Ensembl versioned/unversioned, Entrez via
+    first-hit or list resolution, HGNC symbol via org.Hs.eg.db or biomaRt),
+    reruns a standard ORA/GSEA enrichment battery across pathway databases
+    (GO, KEGG, Reactome, WikiPathways) for every mapping branch, and reports
+    a per-pathway fragility score that quantifies how much of the enrichment
+    call depends on the mapping choice rather than the underlying biology.
+    Includes a mapping-noise null model to separate structured mapping-driven
+    instability from what finite-list-size sampling alone would produce.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.1
+Depends:
+    R (>= 4.2)
+Imports:
+    stats,
+    utils
+Suggests:
+    testthat (>= 3.0.0),
+    DESeq2,
+    SummarizedExperiment,
+    org.Hs.eg.db,
+    AnnotationDbi,
+    biomaRt,
+    clusterProfiler,
+    ReactomePA,
+    fgsea,
+    airway,
+    targets,
+    ggplot2,
+    UpSetR
+Config/testthat/edition: 3

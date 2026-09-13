@@ -1,0 +1,72 @@
+on:
+  push:
+    branches: [main, "claude/**"]
+  pull_request:
+    branches: [main]
+
+name: R-CMD-check
+
+jobs:
+  unit-tests:
+    # Fast path: pure-R stability-metric and mapping-resolution-policy logic
+    # (R/stability-metrics.R, R/mapping-matrix.R, R/fragility-lookup.R) needs
+    # no Bioconductor packages, so this job runs on every push without
+    # waiting on the heavy annotation/enrichment stack. Tests that do touch a
+    # Suggests-only package (e.g. clusterProfiler) skip themselves via
+    # `testthat::skip_if(requireNamespace(...))` rather than failing here.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+      - name: Install testthat
+        run: install.packages("testthat")
+        shell: Rscript {0}
+      - name: Run unit tests
+        working-directory: idmapaudit
+        run: |
+          for (f in list.files("R", full.names = TRUE)) source(f)
+          library(testthat)
+          results <- test_dir("tests/testthat", reporter = "summary", stop_on_failure = FALSE)
+          df <- as.data.frame(results)
+          if (sum(df$failed) > 0 || any(df$error)) stop("Unit tests failed.")
+        shell: Rscript {0}
+
+  airway-smoke-test:
+    # Plan §6: run the full DE -> ID-mapping-matrix -> enrichment ->
+    # stability-metric pipeline on the airway prototype on every push, so
+    # breakage is caught before it costs a debugging session scaling to the
+    # three-dataset study.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          working-directory: idmapaudit
+          extra-packages: |
+            any::testthat
+            any::targets
+            any::airway
+            any::DESeq2
+            any::SummarizedExperiment
+            any::org.Hs.eg.db
+            any::AnnotationDbi
+            any::biomaRt
+            any::clusterProfiler
+            any::ReactomePA
+            any::fgsea
+          needs: check
+      - name: Build and install idmapaudit
+        run: R CMD INSTALL idmapaudit
+      - name: Run airway prototype pipeline
+        working-directory: analysis/airway-prototype
+        run: targets::tar_make()
+        shell: Rscript {0}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: airway-fragility-table
+          path: analysis/airway-prototype/results/airway_fragility_table.tsv
