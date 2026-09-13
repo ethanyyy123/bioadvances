@@ -6,6 +6,17 @@ on:
 
 name: R-CMD-check
 
+# The repo root carries a renv scaffold (renv.lock, renv/, .Rprofile) for
+# local reproducibility (see README). Its .Rprofile auto-activates renv on
+# every Rscript invocation, which silently redirects package installs and
+# pak's own library lookups into the renv-private project library -- neither
+# job here uses renv::restore(); both rely on r-lib/actions' own
+# pak-based resolution, which does not expect that redirection. Disabling
+# the autoloader for CI is the fix (a documented renv option), not removing
+# the scaffold, which is still useful for local `renv::restore()` runs.
+env:
+  RENV_CONFIG_AUTOLOADER_ENABLED: false
+
 jobs:
   unit-tests:
     # Fast path: pure-R stability-metric and mapping-resolution-policy logic
