@@ -43,3 +43,26 @@ test_that("run_enrichment_battery requires ranked_stat when GSEA is requested", 
     "ranked_stat"
   )
 })
+
+test_that("run_enrichment_battery errors on KEGG/Reactome/WikiPathways for a non-Entrez key_type", {
+  skip_if_not(requireNamespace("clusterProfiler", quietly = TRUE))
+  expect_error(
+    run_enrichment_battery(query = c("g1"), background = c("g1", "g2"), modes = "ORA",
+                            dbs = "KEGG", key_type = "ENSEMBL"),
+    "Entrez"
+  )
+})
+
+test_that(".is_total_mapping_failure recognizes AnnotationDbi's zero-valid-keys error (regression)", {
+  # This is the exact condition that crashed the real airway targets
+  # pipeline in CI: enrichGO()'s internal AnnotationDbi::select() call
+  # throws this hard error -- rather than returning NAs with a warning --
+  # when *none* of the query genes match the branch's keyType, which is
+  # exactly what the versioned-Ensembl positive-control branch produces.
+  e <- tryCatch(stop("None of the keys entered are valid keys for 'ENSEMBL'."),
+                error = function(e) e)
+  expect_true(.is_total_mapping_failure(e))
+
+  other <- tryCatch(stop("some unrelated failure"), error = function(e) e)
+  expect_false(.is_total_mapping_failure(other))
+})

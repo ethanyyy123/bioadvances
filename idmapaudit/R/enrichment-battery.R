@@ -84,24 +84,40 @@ run_enrichment_battery <- function(query, background, ranked_stat = NULL,
         "the Entrez-space arm of the mapping matrix.", call. = FALSE
       )
     }
-    res <- switch(db,
-      GO_BP = ,
-      GO_MF = ,
-      GO_CC = clusterProfiler::enrichGO(
-        gene = query, universe = background, OrgDb = org_db, keyType = key_type,
-        ont = sub("GO_", "", db), pAdjustMethod = "BH"
+    # Total (or near-total) mapping failure -- exactly what the
+    # versioned-Ensembl positive control branch (plan §5.1) is designed to
+    # produce -- makes AnnotationDbi::select() throw a hard error
+    # ("None of the keys entered are valid keys for '<keyType>'") instead of
+    # returning NAs, because *zero* query genes match the keytype rather
+    # than just some. A tool whose purpose is auditing mapping-branch
+    # failure must not itself crash on that exact failure mode: it is a
+    # real, informative result (zero pathways testable in this branch/db),
+    # not a bug, so it is caught here and returned as an empty result table
+    # rather than propagated. Any other error is re-thrown -- this package
+    # audits pipeline failures, it does not get to hide its own.
+    res <- tryCatch(
+      switch(db,
+        GO_BP = ,
+        GO_MF = ,
+        GO_CC = clusterProfiler::enrichGO(
+          gene = query, universe = background, OrgDb = org_db, keyType = key_type,
+          ont = sub("GO_", "", db), pAdjustMethod = "BH"
+        ),
+        KEGG = clusterProfiler::enrichKEGG(
+          gene = query, universe = background, keyType = "kegg", pAdjustMethod = "BH"
+        ),
+        Reactome = {
+          .require_pkg("ReactomePA")
+          ReactomePA::enrichPathway(gene = query, universe = background, pAdjustMethod = "BH")
+        },
+        WikiPathways = clusterProfiler::enrichWP(gene = query, universe = background),
+        stop("Unknown ORA database: ", db)
       ),
-      KEGG = clusterProfiler::enrichKEGG(
-        gene = query, universe = background, keyType = "kegg", pAdjustMethod = "BH"
-      ),
-      Reactome = {
-        .require_pkg("ReactomePA")
-        ReactomePA::enrichPathway(gene = query, universe = background, pAdjustMethod = "BH")
-      },
-      WikiPathways = clusterProfiler::enrichWP(gene = query, universe = background),
-      stop("Unknown ORA database: ", db)
+      error = function(e) {
+        if (.is_total_mapping_failure(e)) NULL else stop(e)
+      }
     )
-    tbl <- as.data.frame(res)
+    tbl <- if (is.null(res)) .empty_result() else as.data.frame(res)
     if (nrow(tbl) == 0) {
       return(.empty_result())
     }
@@ -131,6 +147,26 @@ run_enrichment_battery <- function(query, background, ranked_stat = NULL,
     pathway_id = character(0), p_adjust = numeric(0),
     stat = numeric(0), significant = logical(0), stringsAsFactors = FALSE
   )
+}
+
+#' Detect AnnotationDbi's "zero valid keys" error condition
+#'
+#' `AnnotationDbi::select()` (called inside `clusterProfiler::enrichGO()`)
+#' throws a hard error, not a warning, when *none* of the supplied keys
+#' match the given key type -- distinct from a partial mismatch, which
+#' returns `NA`s with a warning. This is exactly the failure mode the
+#' versioned-Ensembl positive-control branch (plan §5.1) is designed to
+#' produce, so `.run_one_enrichment()` must recognize and recover from it
+#' rather than let it crash the branch loop. Factored out as its own
+#' function so the detection logic is unit-testable without the
+#' Bioconductor stack that triggers the real error.
+#'
+#' @param e a condition object (as passed to a `tryCatch` `error` handler).
+#' @return `TRUE` if `e`'s message matches AnnotationDbi's zero-valid-keys
+#'   wording, `FALSE` otherwise.
+#' @noRd
+.is_total_mapping_failure <- function(e) {
+  grepl("valid keys", conditionMessage(e), fixed = TRUE)
 }
 
 .require_pkg <- function(pkg) {
