@@ -32,7 +32,10 @@ jobs:
         with:
           use-public-rspm: true
       - name: Install testthat
-        run: install.packages("testthat")
+        # Explicit repos=: renv's .Rprofile activation used to set a CRAN
+        # mirror as a side effect (masking that nothing else here does),
+        # which disabling the autoloader above removes along with the bug.
+        run: install.packages("testthat", repos = "https://cloud.r-project.org")
         shell: Rscript {0}
       - name: Run unit tests
         working-directory: idmapaudit
