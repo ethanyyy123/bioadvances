@@ -71,6 +71,29 @@ test_that("apply_mapping_branch keeps every edge of a one-to-many mapping (regre
   expect_length(out$query, 3)
 })
 
+test_that("apply_mapping_branch reports zero attrition under one-to-many expansion (regression)", {
+  # Both g1 and g2 found a target (g1 found two); nothing was lost. An
+  # earlier implementation computed attrition from the size of the mapped
+  # image (3 rows) against the native list (2 genes), giving a nonsensical
+  # negative attrition rate here.
+  mapping <- data.frame(from = c("g1", "g1", "g2"), to = c("e1", "e2", "e3"),
+                         stringsAsFactors = FALSE)
+  out <- apply_mapping_branch(c("g1", "g2"), c("g1", "g2"), mapping)
+  expect_equal(out$query_attrition, 0)
+  expect_equal(out$background_attrition, 0)
+})
+
+test_that("apply_mapping_branch reports zero attrition under many-to-one collapse (regression)", {
+  # g1 and g2 both map, onto the same target e1. An earlier implementation
+  # would report this as 50% attrition (image size 1 vs native size 2)
+  # though every native gene successfully mapped.
+  mapping <- data.frame(from = c("g1", "g2"), to = c("e1", "e1"),
+                         stringsAsFactors = FALSE)
+  out <- apply_mapping_branch(c("g1", "g2"), c("g1", "g2"), mapping)
+  expect_equal(out$query_attrition, 0)
+  expect_setequal(out$query, "e1")
+})
+
 test_that("run_mapping_matrix builds one branch per policy and leaves unlisted resolvers as-is", {
   resolvers <- list(
     ens = function(genes) data.frame(from = genes, to = genes, stringsAsFactors = FALSE),

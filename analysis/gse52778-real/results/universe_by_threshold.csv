@@ -1,0 +1,5 @@
+"threshold","file1_n","file2_n","pct_diff"
+"all annotated (mean FPKM > -Inf)",23273,39376,69.2
+"detected (mean FPKM > 0)",19966,30109,50.8
+"mean FPKM > 0.1",15297,18533,21.2
+"mean FPKM > 1",12262,12710,3.7

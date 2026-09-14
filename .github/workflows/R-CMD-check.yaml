@@ -35,7 +35,12 @@ jobs:
         # Explicit repos=: renv's .Rprofile activation used to set a CRAN
         # mirror as a side effect (masking that nothing else here does),
         # which disabling the autoloader above removes along with the bug.
-        run: install.packages("testthat", repos = "https://cloud.r-project.org")
+        # Use the RSPM *binary* mirror (same one use-public-rspm: true wires
+        # up for setup-r-dependencies), not a source-only mirror: pointing
+        # at plain cloud.r-project.org forced every dependency to compile
+        # from source against this runner's R version, and fs's C++ build
+        # failed partway through, taking pkgload and testthat down with it.
+        run: install.packages("testthat", repos = "https://packagemanager.posit.co/cran/__linux__/noble/latest")
         shell: Rscript {0}
       - name: Run unit tests
         working-directory: idmapaudit

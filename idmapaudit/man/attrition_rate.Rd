@@ -4,19 +4,33 @@
 \alias{attrition_rate}
 \title{Gene-level attrition rate for one ID-mapping branch}
 \usage{
-attrition_rate(native_genes, mapped_genes)
+attrition_rate(native_genes, mapped_native_genes)
 }
 \arguments{
 \item{native_genes}{character vector of gene IDs in the native
 (pre-mapping) namespace, e.g. the DESeq2-significant Ensembl gene list.}
 
-\item{mapped_genes}{character vector: the image of \code{native_genes} under
-the branch's mapping (genes that failed to map are simply absent).}
+\item{mapped_native_genes}{character vector: the subset of \code{native_genes}
+that has at least one target under the branch's mapping (i.e. the
+\code{from}-keys of the resolved mapping table, restricted to \code{native_genes}
+-- not the mapped-to IDs themselves).}
 }
 \value{
 numeric in [0, 1].
 }
 \description{
-Methods note §6: the fraction of a native-ID gene list lost when mapped
-into a given branch's namespace.
+Methods note §6: the fraction of a native-ID gene list that has \emph{no}
+target under the branch's mapping.
+}
+\details{
+This is deliberately defined on native keys with zero targets, not on the
+size of the image set, because the image-set-ratio version conflates
+attrition with two things that are not attrition at all: (i) many-to-one
+collapse (two native IDs mapping to the same target both succeeded; the
+image is merely smaller) would be reported as attrition though nothing
+was lost, and (ii) one-to-many expansion under the \code{"list"}/\code{"all"}
+resolution policy (plan §5.1) can inflate the image past the native set
+size, driving the image-ratio version negative. Counting native keys with
+at least one target is well-defined and non-negative under every
+resolution policy.
 }

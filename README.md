@@ -8,6 +8,15 @@ pipeline, varies only that choice, and reports a per-pathway **fragility
 score**: how much of a pathway's "significant" call survives the
 ID-mapping decision, versus being an artifact of it.
 
+**Generative-AI use disclosure.** This repository's code, tests, analysis
+scripts, and manuscript were implemented by Claude (Anthropic), a generative-AI
+coding assistant, under the direction and iterative review of the
+corresponding author (see the manuscript's Author Contributions and
+Generative-AI Use sections). Every commit's Git authorship metadata
+correspondingly reads "Claude" rather than the human author's name; we
+disclose this explicitly rather than leaving it for a reader of the commit
+history to discover on their own.
+
 Prototype dataset: `airway` (GSE52778, Himes et al. 2014), a glucocorticoid
 (dexamethasone) response study in airway smooth muscle. Full study design,
 research questions, and statistical framework are in the project plan; the

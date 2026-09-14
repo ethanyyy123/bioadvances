@@ -15,6 +15,27 @@ for (f in list.files("R", full.names = TRUE)) source(f)
 FDR_CUTOFF <- 0.05
 ORA_DBS <- c("GO_BP", "KEGG", "Reactome", "WikiPathways")
 
+# clusterProfiler::enrichGO() accepts an arbitrary OrgDb key type, but
+# enrichKEGG()/enrichPathway()/enrichWP() do not (see
+# R/enrichment-battery.R::run_enrichment_battery() key_type docs): they
+# accept only Entrez-family IDs with no general key-type argument. So each
+# branch needs (a) the correct key_type for enrichGO, and (b) a `dbs`
+# restriction to GO_* unless the branch's namespace is Entrez.
+BRANCH_KEY_TYPE <- c(
+  ens_unversioned         = "ENSEMBL",
+  ens_versioned           = "ENSEMBL", # expected to fail near-total: org.Hs.eg.db's
+                                        # ENSEMBL keytype is unversioned (plan §5.1
+                                        # positive control)
+  entrez_orgdb__first     = "ENTREZID",
+  entrez_orgdb__list      = "ENTREZID",
+  symbol_orgdb__first     = "SYMBOL",
+  symbol_orgdb__list      = "SYMBOL",
+  symbol_biomart          = "SYMBOL"
+)
+branch_dbs <- function(branch) {
+  if (BRANCH_KEY_TYPE[[branch]] == "ENTREZID") ORA_DBS else "GO_BP"
+}
+
 list(
   tar_target(de, run_airway_de(fdr_cutoff = FDR_CUTOFF)),
 
@@ -38,7 +59,8 @@ list(
         b <- mapping_matrix[[branch]]
         run_enrichment_battery(
           query = b$query, background = b$background,
-          modes = "ORA", dbs = ORA_DBS, fdr_cutoff = FDR_CUTOFF
+          modes = "ORA", dbs = branch_dbs(branch), fdr_cutoff = FDR_CUTOFF,
+          key_type = BRANCH_KEY_TYPE[[branch]]
         )
       }),
       names(mapping_matrix)

@@ -130,19 +130,33 @@ classify_fragility <- function(F_p, tau_lo = 0.1, tau_hi = 0.9) {
 
 #' Gene-level attrition rate for one ID-mapping branch
 #'
-#' Methods note §6: the fraction of a native-ID gene list lost when mapped
-#' into a given branch's namespace.
+#' Methods note §6: the fraction of a native-ID gene list that has *no*
+#' target under the branch's mapping.
+#'
+#' This is deliberately defined on native keys with zero targets, not on the
+#' size of the image set, because the image-set-ratio version conflates
+#' attrition with two things that are not attrition at all: (i) many-to-one
+#' collapse (two native IDs mapping to the same target both succeeded; the
+#' image is merely smaller) would be reported as attrition though nothing
+#' was lost, and (ii) one-to-many expansion under the `"list"`/`"all"`
+#' resolution policy (plan §5.1) can inflate the image past the native set
+#' size, driving the image-ratio version negative. Counting native keys with
+#' at least one target is well-defined and non-negative under every
+#' resolution policy.
 #'
 #' @param native_genes character vector of gene IDs in the native
 #'   (pre-mapping) namespace, e.g. the DESeq2-significant Ensembl gene list.
-#' @param mapped_genes character vector: the image of `native_genes` under
-#'   the branch's mapping (genes that failed to map are simply absent).
+#' @param mapped_native_genes character vector: the subset of `native_genes`
+#'   that has at least one target under the branch's mapping (i.e. the
+#'   `from`-keys of the resolved mapping table, restricted to `native_genes`
+#'   -- not the mapped-to IDs themselves).
 #' @return numeric in \[0, 1\].
 #' @export
-attrition_rate <- function(native_genes, mapped_genes) {
-  n <- length(unique(native_genes))
+attrition_rate <- function(native_genes, mapped_native_genes) {
+  native_genes <- unique(native_genes)
+  n <- length(native_genes)
   if (n == 0) return(NA_real_)
-  1 - length(unique(mapped_genes)) / n
+  1 - length(intersect(native_genes, mapped_native_genes)) / n
 }
 
 #' Cross-dataset agreement of stable/fragile classification
@@ -155,14 +169,18 @@ attrition_rate <- function(native_genes, mapped_genes) {
 #'   `"stable"`/`"fragile"` calls (rows = pathways, columns = datasets). Rows
 #'   with any `NA` are dropped before computing agreement.
 #' @return a list with `agreement_rate` (fraction of pathways where all
-#'   datasets agree) and `fleiss_kappa`.
+#'   datasets agree) and `fleiss_kappa`. Both are `NA` if fewer than two
+#'   pathways remain after dropping incomplete rows, or fewer than two
+#'   raters (datasets/columns) are supplied -- Fleiss' kappa is undefined
+#'   for a single rater (its `raters * (raters - 1)` denominator is 0), and
+#'   "agreement across datasets" is not a meaningful question for one.
 #' @export
 cross_dataset_agreement <- function(class_matrix) {
   m <- as.matrix(class_matrix)
   complete <- stats::complete.cases(m)
   m <- m[complete, , drop = FALSE]
   n <- nrow(m)
-  if (n == 0) {
+  if (n == 0 || ncol(m) < 2) {
     return(list(agreement_rate = NA_real_, fleiss_kappa = NA_real_))
   }
   agreement_rate <- mean(apply(m, 1, function(r) length(unique(r)) == 1))

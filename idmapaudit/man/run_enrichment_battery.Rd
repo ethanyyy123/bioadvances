@@ -11,6 +11,7 @@ run_enrichment_battery(
   dbs = c("GO_BP", "KEGG", "Reactome", "WikiPathways"),
   modes = c("ORA", "GSEA"),
   org_db = "org.Hs.eg.db",
+  key_type = "ENTREZID",
   fdr_cutoff = 0.05
 )
 }
@@ -26,13 +27,34 @@ branch's namespace).}
 branch's namespace) of the DESeq2 test statistic, for GSEA mode. May be
 \code{NULL} if \code{modes} excludes \code{"GSEA"}.}
 
-\item{dbs}{character vector, subset of \code{c("GO_BP", "GO_MF", "GO_CC", "KEGG", "Reactome", "WikiPathways")}.}
+\item{dbs}{character vector, subset of \code{c("GO_BP", "GO_MF", "GO_CC", "KEGG", "Reactome", "WikiPathways")}. Only \code{enrichGO} (GO_*) genuinely
+supports arbitrary \code{key_type} via the OrgDb; \code{clusterProfiler::enrichKEGG()}
+accepts only \code{"kegg"}/\code{"ncbi-geneid"}/\code{"ncbi-proteinid"}/\code{"uniprot"}, and
+\code{ReactomePA::enrichPathway()}/\code{clusterProfiler::enrichWP()} accept only
+Entrez Gene IDs with no key-type argument at all. Requesting KEGG,
+Reactome, or WikiPathways with \code{key_type != "ENTREZID"} therefore errors
+explicitly (see \code{.run_one_enrichment}) rather than silently converting or
+returning an empty/wrong result: the primary namespace factor (plan
+§5.1) can only be fully crossed against GO; KEGG/Reactome/WikiPathways
+fragility is measured only across the Entrez-space branches (native
+Entrez, entrez_first, entrez_list).}
 
 \item{modes}{character vector, subset of \code{c("ORA", "GSEA")}.}
 
 \item{org_db}{the annotation package/object to pass through to
 clusterProfiler (e.g. \code{org.Hs.eg.db::org.Hs.eg.db}), or a string such as
 \code{"org.Hs.eg.db"}.}
+
+\item{key_type}{the clusterProfiler/OrgDb key type of \code{query}/\code{background}
+in \emph{this} branch, e.g. \code{"ENSEMBL"}, \code{"SYMBOL"}, or \code{"ENTREZID"} (see
+\code{AnnotationDbi::keytypes(org.Hs.eg.db::org.Hs.eg.db)} for the full set
+\code{enrichGO()} accepts). This is not optional: \code{clusterProfiler::enrichGO()}
+silently assumes \code{"ENTREZID"} if it is not supplied, which for any
+Ensembl- or Symbol-space branch returns an empty or nonsensical result
+rather than an error -- exactly the kind of silent per-branch failure
+this package exists to catch, so it must not also be present in its own
+enrichment call. There is no equivalent for KEGG/Reactome/WikiPathways
+(see \code{dbs} below): those three functions accept only Entrez-family IDs.}
 
 \item{fdr_cutoff}{FDR threshold used only to label results; full result
 tables are always returned unfiltered so callers can recompute at a

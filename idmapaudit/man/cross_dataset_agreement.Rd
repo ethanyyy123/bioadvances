@@ -13,7 +13,11 @@ with any \code{NA} are dropped before computing agreement.}
 }
 \value{
 a list with \code{agreement_rate} (fraction of pathways where all
-datasets agree) and \code{fleiss_kappa}.
+datasets agree) and \code{fleiss_kappa}. Both are \code{NA} if fewer than two
+pathways remain after dropping incomplete rows, or fewer than two
+raters (datasets/columns) are supplied -- Fleiss' kappa is undefined
+for a single rater (its \code{raters * (raters - 1)} denominator is 0), and
+"agreement across datasets" is not a meaningful question for one.
 }
 \description{
 Methods note §5: simple agreement rate and Fleiss' kappa across datasets

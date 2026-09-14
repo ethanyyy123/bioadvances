@@ -104,6 +104,27 @@ test_that("attrition_rate matches hand computation, including duplicate genes", 
   expect_equal(attrition_rate(c("a", "b"), character(0)), 1)
 })
 
+test_that("attrition_rate is 0 under many-to-one collapse (regression)", {
+  # Two native genes both successfully map, onto the SAME target. Nothing
+  # was lost -- an image-size-ratio definition would wrongly report 50%
+  # attrition here (image has 1 element, native has 2); attrition_rate must
+  # report 0 because both native keys found a target.
+  expect_equal(attrition_rate(c("g1", "g2"), c("g1", "g2")), 0)
+})
+
+test_that("attrition_rate stays in [0, 1] under one-to-many expansion (regression)", {
+  # g1 expands to two targets (the "list"/"all" resolution policy, plan
+  # §5.1); g2 maps to one target. Both native genes found >=1 target, so
+  # attrition is 0 -- an image-size-ratio definition would go negative here
+  # (image has 3 elements against 2 native genes).
+  expect_equal(attrition_rate(c("g1", "g2"), c("g1", "g1", "g2")), 0)
+})
+
+test_that("attrition_rate correctly counts a real, partial failure to map", {
+  # g1 and g2 map; g3 does not. 1 of 3 native genes failed.
+  expect_equal(attrition_rate(c("g1", "g2", "g3"), c("g1", "g2")), 1 / 3)
+})
+
 test_that("cross_dataset_agreement matches the hand-derived Fleiss' kappa", {
   m <- rbind(
     c("stable", "stable", "stable"),
@@ -123,6 +144,17 @@ test_that("cross_dataset_agreement drops incomplete rows", {
   )
   out <- cross_dataset_agreement(m)
   expect_equal(out$agreement_rate, 1)
+})
+
+test_that("cross_dataset_agreement returns NA, not NaN, for a single-rater matrix (regression)", {
+  # Fleiss' kappa's raters*(raters-1) denominator is 0 for a single column;
+  # an earlier implementation let this propagate to NaN instead of the
+  # documented NA.
+  m <- matrix(c("stable", "fragile", "stable"), ncol = 1)
+  out <- cross_dataset_agreement(m)
+  expect_true(is.na(out$agreement_rate))
+  expect_true(is.na(out$fleiss_kappa))
+  expect_false(is.nan(out$fleiss_kappa))
 })
 
 test_that("excess_instability matches hand computation", {

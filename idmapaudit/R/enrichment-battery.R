@@ -20,9 +20,31 @@
 #' @param org_db the annotation package/object to pass through to
 #'   clusterProfiler (e.g. `org.Hs.eg.db::org.Hs.eg.db`), or a string such as
 #'   `"org.Hs.eg.db"`.
+#' @param key_type the clusterProfiler/OrgDb key type of `query`/`background`
+#'   in *this* branch, e.g. `"ENSEMBL"`, `"SYMBOL"`, or `"ENTREZID"` (see
+#'   `AnnotationDbi::keytypes(org.Hs.eg.db::org.Hs.eg.db)` for the full set
+#'   `enrichGO()` accepts). This is not optional: `clusterProfiler::enrichGO()`
+#'   silently assumes `"ENTREZID"` if it is not supplied, which for any
+#'   Ensembl- or Symbol-space branch returns an empty or nonsensical result
+#'   rather than an error -- exactly the kind of silent per-branch failure
+#'   this package exists to catch, so it must not also be present in its own
+#'   enrichment call. There is no equivalent for KEGG/Reactome/WikiPathways
+#'   (see `dbs` below): those three functions accept only Entrez-family IDs.
 #' @param fdr_cutoff FDR threshold used only to label results; full result
 #'   tables are always returned unfiltered so callers can recompute at a
 #'   different threshold (plan §8 threshold-sensitivity check).
+#' @param dbs character vector, subset of `c("GO_BP", "GO_MF", "GO_CC",
+#'   "KEGG", "Reactome", "WikiPathways")`. Only `enrichGO` (GO_*) genuinely
+#'   supports arbitrary `key_type` via the OrgDb; `clusterProfiler::enrichKEGG()`
+#'   accepts only `"kegg"`/`"ncbi-geneid"`/`"ncbi-proteinid"`/`"uniprot"`, and
+#'   `ReactomePA::enrichPathway()`/`clusterProfiler::enrichWP()` accept only
+#'   Entrez Gene IDs with no key-type argument at all. Requesting KEGG,
+#'   Reactome, or WikiPathways with `key_type != "ENTREZID"` therefore errors
+#'   explicitly (see `.run_one_enrichment`) rather than silently converting or
+#'   returning an empty/wrong result: the primary namespace factor (plan
+#'   §5.1) can only be fully crossed against GO; KEGG/Reactome/WikiPathways
+#'   fragility is measured only across the Entrez-space branches (native
+#'   Entrez, entrez_first, entrez_list).
 #' @return a named list keyed `"<mode>.<db>"`, each element a data.frame with
 #'   at least columns `pathway_id`, `p_adjust`, `stat` (`-log10(p_adjust)`
 #'   for ORA, `NES` for GSEA), and `significant` (logical, at `fdr_cutoff`).
@@ -31,6 +53,7 @@ run_enrichment_battery <- function(query, background, ranked_stat = NULL,
                                     dbs = c("GO_BP", "KEGG", "Reactome", "WikiPathways"),
                                     modes = c("ORA", "GSEA"),
                                     org_db = "org.Hs.eg.db",
+                                    key_type = "ENTREZID",
                                     fdr_cutoff = 0.05) {
   if ("GSEA" %in% modes && is.null(ranked_stat)) {
     stop("`ranked_stat` is required when `modes` includes \"GSEA\".")
@@ -41,25 +64,35 @@ run_enrichment_battery <- function(query, background, ranked_stat = NULL,
       key <- paste(mode, db, sep = ".")
       results[[key]] <- .run_one_enrichment(
         mode = mode, db = db, query = query, background = background,
-        ranked_stat = ranked_stat, org_db = org_db, fdr_cutoff = fdr_cutoff
+        ranked_stat = ranked_stat, org_db = org_db, key_type = key_type,
+        fdr_cutoff = fdr_cutoff
       )
     }
   }
   results
 }
 
-.run_one_enrichment <- function(mode, db, query, background, ranked_stat, org_db, fdr_cutoff) {
+.run_one_enrichment <- function(mode, db, query, background, ranked_stat, org_db, key_type, fdr_cutoff) {
   if (mode == "ORA") {
     .require_pkg("clusterProfiler")
+    if (db %in% c("KEGG", "Reactome", "WikiPathways") && !identical(key_type, "ENTREZID")) {
+      stop(
+        db, " enrichment requires Entrez Gene IDs (clusterProfiler::enrichKEGG(), ",
+        "ReactomePA::enrichPathway(), and clusterProfiler::enrichWP() have no general ",
+        "key-type argument), but this branch supplies key_type = \"", key_type, "\". ",
+        "Restrict `dbs` to GO_* for non-Entrez branches, or run this branch only for ",
+        "the Entrez-space arm of the mapping matrix.", call. = FALSE
+      )
+    }
     res <- switch(db,
       GO_BP = ,
       GO_MF = ,
       GO_CC = clusterProfiler::enrichGO(
-        gene = query, universe = background, OrgDb = org_db,
+        gene = query, universe = background, OrgDb = org_db, keyType = key_type,
         ont = sub("GO_", "", db), pAdjustMethod = "BH"
       ),
       KEGG = clusterProfiler::enrichKEGG(
-        gene = query, universe = background, pAdjustMethod = "BH"
+        gene = query, universe = background, keyType = "kegg", pAdjustMethod = "BH"
       ),
       Reactome = {
         .require_pkg("ReactomePA")

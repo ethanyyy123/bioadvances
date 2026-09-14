@@ -1,6 +1,7 @@
-"pattern","n","pct"
-"contains_slash",1,0
-"linc_or_loc_placeholder",1417,6.09
-"orf_placeholder",878,3.77
-"sbsrna_placeholder",1,0
-"ends_with_dash_number",338,1.45
+"category","n","pct_of_all_symbols"
+"LOC###### (provisional placeholder)",1275,5.48
+"C#orf# (provisional placeholder)",878,3.77
+"LOC or orf, union (genuinely provisional)",2153,9.25
+"LINC#### (current stable nomenclature, NOT provisional)",142,0.61
+"dash-number suffix, total",338,1.45
+"  of which KRTAP/ERV/MIR family (current stable nomenclature)",205,0.88

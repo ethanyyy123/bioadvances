@@ -63,11 +63,14 @@ apply_mapping_branch <- function(query_genes, background_genes, mapping) {
   # semantics. Filtering rows preserves every edge of a one-to-many mapping.
   mapped_query <- mapping$to[mapping$from %in% query_genes]
   mapped_background <- mapping$to[mapping$from %in% background_genes]
+  # attrition_rate() takes the *native* keys that found a target, not the
+  # mapped-to values themselves (see its docs for why: an image-size ratio
+  # is wrong under many-to-one collapse and under the "list" policy).
   list(
     query = mapped_query,
     background = mapped_background,
-    query_attrition = attrition_rate(query_genes, mapped_query),
-    background_attrition = attrition_rate(background_genes, mapped_background)
+    query_attrition = attrition_rate(query_genes, intersect(query_genes, mapping$from)),
+    background_attrition = attrition_rate(background_genes, intersect(background_genes, mapping$from))
   )
 }
 
