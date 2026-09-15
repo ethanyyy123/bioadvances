@@ -53,6 +53,19 @@ test_that("run_enrichment_battery errors on KEGG/Reactome/WikiPathways for a non
   )
 })
 
+test_that("run_enrichment_battery defaults organism to \"Homo sapiens\" for enrichWP (regression)", {
+  # This is the exact condition that crashed the real airway targets
+  # pipeline in CI *after* the .is_total_mapping_failure fix: DE and the
+  # ID-mapping matrix completed, enrichment_by_branch reached WikiPathways,
+  # and clusterProfiler::enrichWP() -- unlike enrichKEGG() ("hsa") and
+  # enrichPathway() ("human"), which both default their organism -- has no
+  # default at all, and errored with `argument "organism" is missing, with
+  # no default`. Verified here at the argument-default level (no
+  # Bioconductor call), since exercising the real error requires the full
+  # WikiPathways data download that only the CI smoke test performs.
+  expect_equal(formals(run_enrichment_battery)$organism, "Homo sapiens")
+})
+
 test_that(".is_total_mapping_failure recognizes AnnotationDbi's zero-valid-keys error (regression)", {
   # This is the exact condition that crashed the real airway targets
   # pipeline in CI: enrichGO()'s internal AnnotationDbi::select() call

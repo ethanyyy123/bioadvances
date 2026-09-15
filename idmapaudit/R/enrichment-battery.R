@@ -20,6 +20,13 @@
 #' @param org_db the annotation package/object to pass through to
 #'   clusterProfiler (e.g. `org.Hs.eg.db::org.Hs.eg.db`), or a string such as
 #'   `"org.Hs.eg.db"`.
+#' @param organism species name passed to `clusterProfiler::enrichWP()`
+#'   (WikiPathways naming convention, e.g. `"Homo sapiens"`). Unlike
+#'   `enrichKEGG()` (defaults to `"hsa"`) and `enrichPathway()` (defaults to
+#'   `"human"`), `enrichWP()` has no default and errors with `argument
+#'   "organism" is missing, with no default` if it is not supplied -- caught
+#'   in CI on the real airway pipeline, not by unit tests, since it only
+#'   surfaces once a WikiPathways call actually executes.
 #' @param key_type the clusterProfiler/OrgDb key type of `query`/`background`
 #'   in *this* branch, e.g. `"ENSEMBL"`, `"SYMBOL"`, or `"ENTREZID"` (see
 #'   `AnnotationDbi::keytypes(org.Hs.eg.db::org.Hs.eg.db)` for the full set
@@ -54,6 +61,7 @@ run_enrichment_battery <- function(query, background, ranked_stat = NULL,
                                     modes = c("ORA", "GSEA"),
                                     org_db = "org.Hs.eg.db",
                                     key_type = "ENTREZID",
+                                    organism = "Homo sapiens",
                                     fdr_cutoff = 0.05) {
   if ("GSEA" %in% modes && is.null(ranked_stat)) {
     stop("`ranked_stat` is required when `modes` includes \"GSEA\".")
@@ -65,14 +73,14 @@ run_enrichment_battery <- function(query, background, ranked_stat = NULL,
       results[[key]] <- .run_one_enrichment(
         mode = mode, db = db, query = query, background = background,
         ranked_stat = ranked_stat, org_db = org_db, key_type = key_type,
-        fdr_cutoff = fdr_cutoff
+        organism = organism, fdr_cutoff = fdr_cutoff
       )
     }
   }
   results
 }
 
-.run_one_enrichment <- function(mode, db, query, background, ranked_stat, org_db, key_type, fdr_cutoff) {
+.run_one_enrichment <- function(mode, db, query, background, ranked_stat, org_db, key_type, organism, fdr_cutoff) {
   if (mode == "ORA") {
     .require_pkg("clusterProfiler")
     if (db %in% c("KEGG", "Reactome", "WikiPathways") && !identical(key_type, "ENTREZID")) {
@@ -110,7 +118,9 @@ run_enrichment_battery <- function(query, background, ranked_stat = NULL,
           .require_pkg("ReactomePA")
           ReactomePA::enrichPathway(gene = query, universe = background, pAdjustMethod = "BH")
         },
-        WikiPathways = clusterProfiler::enrichWP(gene = query, universe = background),
+        WikiPathways = clusterProfiler::enrichWP(
+          gene = query, universe = background, organism = organism
+        ),
         stop("Unknown ORA database: ", db)
       ),
       error = function(e) {
