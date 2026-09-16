@@ -81,6 +81,22 @@ jobs:
           needs: check
       - name: Build and install idmapaudit
         run: R CMD INSTALL idmapaudit
+      - name: Run unit tests (full Bioconductor stack installed)
+        # The unit-tests job runs the same suite without clusterProfiler
+        # installed, so its one Suggests-gated expectation self-skips
+        # there; this step is what actually exercises it, and is the run
+        # the paper's Table 1 footnote cites for the full 125-expectation
+        # count. Kept as its own step (not merged into "Run airway
+        # prototype pipeline") so a test failure and a pipeline failure
+        # are never conflated in the log.
+        working-directory: idmapaudit
+        run: |
+          for (f in list.files("R", full.names = TRUE)) source(f)
+          library(testthat)
+          results <- test_dir("tests/testthat", reporter = "summary", stop_on_failure = FALSE)
+          df <- as.data.frame(results)
+          if (sum(df$failed) > 0 || any(df$error)) stop("Unit tests failed.")
+        shell: Rscript {0}
       - name: Run airway prototype pipeline
         working-directory: analysis/airway-prototype
         run: targets::tar_make()
