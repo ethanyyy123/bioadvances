@@ -110,8 +110,30 @@ run_mapping_matrix <- function(query_genes, background_genes, resolvers,
   all_genes <- union(query_genes, background_genes)
   branches <- list()
   for (name in names(resolvers)) {
-    raw <- resolvers[[name]](all_genes)
+    # A resolver's own dependency can be an unreachable live web service
+    # (biomaRt's Ensembl BioMart queries, used by two of the five primary
+    # resolvers) rather than a bug in this package or in R itself. One
+    # branch's external-service outage halting run_mapping_matrix() would
+    # take every *other* branch's mapping down with it -- silently hiding
+    # the namespace comparison this function exists to run, in the one
+    # component of this tool whose own failure mode this package is built
+    # to audit. So that specific, recognized failure is caught and recorded
+    # per-branch as unavailable rather than propagated; any other error
+    # (a real bug in the resolver) still halts the pipeline immediately.
+    raw <- tryCatch(resolvers[[name]](all_genes), error = function(e) e)
     policies <- resolution_policies[[name]]
+    branch_names <- if (is.null(policies)) name else paste0(name, "__", policies)
+    if (inherits(raw, "error")) {
+      if (!.is_external_service_unavailable(raw)) stop(raw)
+      for (bn in branch_names) {
+        branches[[bn]] <- list(
+          query = character(0), background = character(0),
+          query_attrition = NA_real_, background_attrition = NA_real_,
+          error = conditionMessage(raw)
+        )
+      }
+      next
+    }
     if (is.null(policies)) {
       branches[[name]] <- apply_mapping_branch(query_genes, background_genes, raw)
     } else {
@@ -124,4 +146,21 @@ run_mapping_matrix <- function(query_genes, background_genes, resolvers,
     }
   }
   branches
+}
+
+#' Detect biomaRt's "no reachable Ensembl mirror" error condition
+#'
+#' `biomaRt::useEnsembl()` already retries across its own known mirrors
+#' (www, useast, asia, uswest) before giving up; this recognizes only the
+#' point at which it has exhausted all of them, not an ordinary R error, so
+#' a genuine bug elsewhere in a resolver is never silently swallowed.
+#' Factored out as its own function so the detection logic is unit-testable
+#' without a live (or dead) network dependency.
+#'
+#' @param e a condition object (as passed to a `tryCatch` `error` handler).
+#' @return `TRUE` if `e`'s message matches biomaRt's mirror-exhaustion
+#'   wording, `FALSE` otherwise.
+#' @noRd
+.is_external_service_unavailable <- function(e) {
+  grepl("Unable to query any Ensembl site", conditionMessage(e), fixed = TRUE)
 }

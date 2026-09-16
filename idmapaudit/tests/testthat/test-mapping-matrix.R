@@ -117,3 +117,41 @@ test_that("run_mapping_matrix builds one branch per policy and leaves unlisted r
   expect_setequal(out$entrez__first$query, c("e1", "e3"))
   expect_setequal(out$entrez__list$query, c("e1", "e2", "e3"))
 })
+
+test_that("run_mapping_matrix catches a biomaRt mirror-exhaustion error without halting other branches (regression)", {
+  # This is the exact condition that crashed the real airway targets
+  # pipeline in CI after both the enrichGO and enrichWP fixes: two of the
+  # five primary resolvers (ens_versioned, symbol_biomart) query Ensembl's
+  # live BioMart web service, which is occasionally unreachable across all
+  # of biomaRt's own mirrors. That specific error must not take down the
+  # other three resolvers, which have nothing to do with biomaRt.
+  resolvers <- list(
+    ens = function(genes) data.frame(from = genes, to = genes, stringsAsFactors = FALSE),
+    flaky_biomart = function(genes) stop("Unable to query any Ensembl site.")
+  )
+  out <- run_mapping_matrix(
+    query_genes = c("g1", "g2"), background_genes = c("g1", "g2"),
+    resolvers = resolvers
+  )
+  expect_setequal(out$ens$query, c("g1", "g2"))
+  expect_equal(out$ens$query_attrition, 0)
+  expect_length(out$flaky_biomart$query, 0)
+  expect_true(is.na(out$flaky_biomart$query_attrition))
+  expect_match(out$flaky_biomart$error, "Unable to query any Ensembl site")
+})
+
+test_that("run_mapping_matrix still propagates a resolver error that is not the recognized biomaRt failure", {
+  resolvers <- list(broken = function(genes) stop("some unrelated resolver bug"))
+  expect_error(
+    run_mapping_matrix(query_genes = "g1", background_genes = "g1", resolvers = resolvers),
+    "some unrelated resolver bug"
+  )
+})
+
+test_that(".is_external_service_unavailable matches only biomaRt's mirror-exhaustion wording", {
+  e <- tryCatch(stop("Unable to query any Ensembl site."), error = function(e) e)
+  expect_true(.is_external_service_unavailable(e))
+
+  other <- tryCatch(stop("some unrelated failure"), error = function(e) e)
+  expect_false(.is_external_service_unavailable(other))
+})

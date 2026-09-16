@@ -57,6 +57,12 @@ list(
     stats::setNames(
       lapply(names(mapping_matrix), function(branch) {
         b <- mapping_matrix[[branch]]
+        # A branch whose resolver hit an unreachable external service
+        # (run_mapping_matrix()'s .is_external_service_unavailable() catch)
+        # has no mapped genes to test; skip it rather than run enrichment
+        # on an empty query, which downstream sig_tables_by_db already
+        # treats as untestable-in-this-branch (not "not significant").
+        if (!is.null(b$error)) return(list())
         run_enrichment_battery(
           query = b$query, background = b$background,
           modes = "ORA", dbs = branch_dbs(branch), fdr_cutoff = FDR_CUTOFF,
